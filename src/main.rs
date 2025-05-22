@@ -6,6 +6,16 @@ struct Flatpak {
     install_type: InstallType,
 }
 
+impl Flatpak {
+    pub fn new(name: &str, options: &str) -> Self {
+        let install_type = InstallType::from_flatpak_options(options);
+        Flatpak {
+            name: String::from(name),
+            install_type: install_type,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum InstallType {
     System,
@@ -25,16 +35,6 @@ impl InstallType {
         match self {
             InstallType::System => String::from("--system"),
             InstallType::User => String::from("--user"),
-        }
-    }
-}
-
-impl Flatpak {
-    pub fn new(name: &str, options: &str) -> Self {
-        let install_type = InstallType::from_flatpak_options(options);
-        Flatpak {
-            name: String::from(name),
-            install_type: install_type,
         }
     }
 }
