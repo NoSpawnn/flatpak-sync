@@ -45,6 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn get_installed_flatpaks() -> Result<Vec<Flatpak>, Box<dyn Error>> {
     let cmd = Command::new("flatpak")
         .arg("list")
+        .arg("--app")
         .arg("--columns=application,options")
         .output()?;
 
