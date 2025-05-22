@@ -1,4 +1,4 @@
-use std::{error::Error, path::PathBuf, process::Command};
+use std::{error::Error, process::Command};
 
 #[derive(Debug)]
 struct Flatpak {
@@ -20,6 +20,13 @@ impl InstallType {
             Self::User
         }
     }
+
+    pub fn flag_string(&self) -> String {
+        match self {
+            InstallType::System => String::from("--system"),
+            InstallType::User => String::from("--user"),
+        }
+    }
 }
 
 impl Flatpak {
@@ -36,20 +43,37 @@ fn main() -> Result<(), Box<dyn Error>> {
     let flatpaks = get_installed_flatpaks()?;
 
     for f in flatpaks {
-        dbg!(&f);
+        println!("Installing {}", &f.name);
+
+        let output = Command::new("flatpak")
+            .arg("install")
+            .arg(f.install_type.flag_string())
+            .arg(&f.name)
+            .output()?;
+
+        if output.status.success() {
+            println!("{} is installed", &f.name)
+        } else {
+            panic!(
+                "Failed to install {}: {}",
+                &f.name,
+                String::from_utf8(output.stderr)?
+            )
+        }
     }
 
     Ok(())
 }
 
 fn get_installed_flatpaks() -> Result<Vec<Flatpak>, Box<dyn Error>> {
-    let cmd = Command::new("flatpak")
+    let output = Command::new("flatpak")
         .arg("list")
         .arg("--app")
         .arg("--columns=application,options")
-        .output()?;
+        .output()?
+        .stdout;
 
-    let flatpaks = String::from_utf8(cmd.stdout)?
+    let flatpaks = String::from_utf8(output)?
         .lines()
         .flat_map(|line| {
             let mut parts = line.split('\t');
