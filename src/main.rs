@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{error::Error, path::PathBuf, process::Command};
 
 #[derive(Debug)]
 struct Flatpak {
@@ -6,7 +6,7 @@ struct Flatpak {
     install_type: InstallType,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum InstallType {
     System,
     User,
@@ -24,35 +24,40 @@ impl InstallType {
 
 impl Flatpak {
     pub fn new(name: &str, options: &str) -> Self {
+        let install_type = InstallType::from_flatpak_options(options);
         Flatpak {
             name: String::from(name),
-            install_type: InstallType::from_flatpak_options(options),
+            install_type: install_type,
         }
     }
 }
 
-fn main() {
-    let c = Command::new("flatpak")
-        .arg("list")
-        .arg("--columns=application,options")
-        .output()
-        .expect("Failed to retrieve installed flatpaks");
-
-    let list: Vec<_> = String::from_utf8(c.stdout)
-        .unwrap()
-        .split_whitespace()
-        .map(|s| s.to_owned())
-        .collect();
-
-    let flatpaks = list.chunks(2).flat_map(|ss| {
-        if let [s1, s2] = ss {
-            Some(Flatpak::new(s1, s2))
-        } else {
-            None
-        }
-    });
+fn main() -> Result<(), Box<dyn Error>> {
+    let flatpaks = get_installed_flatpaks()?;
 
     for f in flatpaks {
         dbg!(&f);
     }
+
+    Ok(())
+}
+
+fn get_installed_flatpaks() -> Result<Vec<Flatpak>, Box<dyn Error>> {
+    let cmd = Command::new("flatpak")
+        .arg("list")
+        .arg("--columns=application,options")
+        .output()?;
+
+    let flatpaks = String::from_utf8(cmd.stdout)?
+        .lines()
+        .flat_map(|line| {
+            let mut parts = line.split('\t');
+            match (parts.next(), parts.next()) {
+                (Some(name), Some(options)) => Some(Flatpak::new(name, options)),
+                _ => None,
+            }
+        })
+        .collect();
+
+    Ok(flatpaks)
 }
