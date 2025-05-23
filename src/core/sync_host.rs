@@ -11,11 +11,12 @@ pub enum Error {
     IoError(io::Error),
     SshKeyGenError(io::Error),
     SshKeyCopyError(io::Error),
-    SshConnectError {
+    SshConnectionError {
         tcp_error: Option<io::Error>,
         ssh_error: Option<ssh2::Error>,
     },
     NoSyncKey,
+    NoSshSession,
 }
 
 pub struct SyncHost {
@@ -35,7 +36,7 @@ impl SyncHost {
         let tcp = match TcpStream::connect(format!("{}:{}", &self.hostname, self.ssh_port)) {
             Ok(stream) => stream,
             Err(e) => {
-                return Err(Error::SshConnectError {
+                return Err(Error::SshConnectionError {
                     tcp_error: Some(e),
                     ssh_error: None,
                 });
@@ -45,7 +46,7 @@ impl SyncHost {
         let mut session = match ssh2::Session::new() {
             Ok(s) => s,
             Err(e) => {
-                return Err(Error::SshConnectError {
+                return Err(Error::SshConnectionError {
                     tcp_error: None,
                     ssh_error: Some(e),
                 });
@@ -55,7 +56,7 @@ impl SyncHost {
         session.set_tcp_stream(tcp);
 
         if let Err(e) = session.handshake() {
-            return Err(Error::SshConnectError {
+            return Err(Error::SshConnectionError {
                 tcp_error: None,
                 ssh_error: Some(e),
             });
@@ -67,7 +68,7 @@ impl SyncHost {
             &self.sync_key_file.as_ref().unwrap(),
             None,
         ) {
-            return Err(Error::SshConnectError {
+            return Err(Error::SshConnectionError {
                 tcp_error: None,
                 ssh_error: Some(e),
             });
@@ -75,6 +76,27 @@ impl SyncHost {
 
         self.ssh_session = Some(session);
         Ok(())
+    }
+
+    pub fn disconnect(&mut self) -> Result<(), Error> {
+        if let Some(session) = self.ssh_session.as_mut() {
+            match session.disconnect(
+                Some(ssh2::DisconnectCode::ByApplication),
+                "Other sync host requested to close the connection",
+                None,
+            ) {
+                Ok(_) => {
+                    self.ssh_session = None;
+                    Ok(())
+                }
+                Err(e) => Err(Error::SshConnectionError {
+                    tcp_error: None,
+                    ssh_error: Some(e),
+                }),
+            }
+        } else {
+            Ok(())
+        }
     }
 
     fn generate_sync_keypair(&mut self, force: bool) -> Result<(), Error> {
