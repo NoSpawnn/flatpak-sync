@@ -18,14 +18,14 @@ pub enum Error {
     SshKeyCopyError(io::Error),
     SshConnectionError {
         tcp_error: Option<io::Error>,
-        ssh_error: Option<ssh2::Error>,
+        ssh_error: Option<openssh::Error>,
     },
     NoSyncKey,
     NoSshSession,
 }
 
-impl From<ssh2::Error> for Error {
-    fn from(err: ssh2::Error) -> Self {
+impl From<openssh::Error> for Error {
+    fn from(err: openssh::Error) -> Self {
         Error::SshConnectionError {
             tcp_error: None,
             ssh_error: Some(err),
@@ -38,46 +38,31 @@ pub struct SyncHost {
     pub hostname: String,
     pub sync_key_file: Option<PathBuf>,
     ssh_port: u16,
-    ssh_session: Option<ssh2::Session>,
+    ssh_session: Option<openssh::Session>,
 }
 
 impl SyncHost {
-    pub fn connect(&mut self) -> Result<(), Error> {
+    pub async fn connect(&mut self) -> Result<(), Error> {
         if self.sync_key_file.is_none() {
             return Err(Error::NoSyncKey);
         }
 
-        let tcp =
-            TcpStream::connect(format!("{}:{}", &self.hostname, self.ssh_port)).map_err(|e| {
-                Error::SshConnectionError {
-                    tcp_error: Some(e),
-                    ssh_error: None,
-                }
-            })?;
-
-        let mut session = ssh2::Session::new()?;
-
-        session.set_tcp_stream(tcp);
-        session.handshake()?;
-        session.userauth_pubkey_file(
-            &self.ssh_username,
-            None,
-            &self.sync_key_file.as_ref().unwrap(),
-            None,
-        )?;
+        let keyfile = self.sync_key_file.as_ref().unwrap();
+        let session = openssh::SessionBuilder::default()
+            .keyfile(keyfile)
+            .connect(format!(
+                "ssh://{}@{}:{}",
+                &self.ssh_username, &self.hostname, self.ssh_port
+            ))
+            .await?;
 
         self.ssh_session = Some(session);
         Ok(())
     }
 
-    pub fn disconnect(&mut self) -> Result<(), Error> {
-        if let Some(session) = self.ssh_session.as_mut() {
-            session.disconnect(
-                Some(ssh2::DisconnectCode::ByApplication),
-                &format!("{} requested to close the connection", self.hostname),
-                None,
-            )?;
-            self.ssh_session = None;
+    pub async fn disconnect(&mut self) -> Result<(), Error> {
+        if let Some(session) = self.ssh_session.take() {
+            session.close().await?;
         }
 
         Ok(())
@@ -124,7 +109,7 @@ impl SyncHost {
                 &keypair_location.to_string_lossy(),
                 "-p",
                 &self.ssh_port.to_string(),
-                &format!("{}@{}", self.ssh_username, self.hostname),
+                &format!("{}@{}", &self.ssh_username, &self.hostname),
             ])
             .status()
             .map_err(Error::SshKeyCopyError)?;
@@ -140,7 +125,7 @@ impl SyncHost {
         Ok(())
     }
 
-    pub fn install_flatpaks(&mut self, flatpaks: &[Flatpak]) -> Result<(), Error> {
+    pub async fn install_flatpaks(&mut self, flatpaks: &[Flatpak]) -> Result<(), Error> {
         if self.ssh_session.is_none() {
             log::warn!("Could not install flatpaks due to no SSH session");
             return Err(Error::NoSshSession);
@@ -156,31 +141,34 @@ impl SyncHost {
             self.hostname
         );
 
-        let mut channel = self
-            .ssh_session
-            .as_ref()
-            .ok_or(Error::NoSshSession)?
-            .channel_session()?;
-
         // Maybe return a list of what failed to install (if anything)?
+        let session = self.ssh_session.as_ref().unwrap();
         for flatpak in flatpaks {
             log::info!("Installing {} on host `{}`", flatpak.name, self.hostname);
 
-            let cmd_string = format!(
-                "flatpak install {} {}",
-                flatpak.install_type.flag_string(),
-                &flatpak.name,
-            );
-            let mut cmd_output = String::new();
+            let output = session
+                .command("flatpak")
+                .args([
+                    "install",
+                    &flatpak.install_type.flag_string(),
+                    &flatpak.name,
+                    "-y",
+                ])
+                .output()
+                .await?;
 
-            channel.exec(&cmd_string)?;
-            let _ = channel.read_to_string(&mut cmd_output);
+            if output.status.success() {
+                log::info!("Installed {} on host `{}`", flatpak.name, self.hostname)
+            } else {
+                log::warn!(
+                    "Failed to install {} on host `{}`",
+                    flatpak.name,
+                    self.hostname
+                )
+            }
+
+            break;
         }
-
-        channel.send_eof()?;
-        channel.wait_eof()?;
-        channel.close()?;
-        channel.wait_close()?;
 
         Ok(())
     }
