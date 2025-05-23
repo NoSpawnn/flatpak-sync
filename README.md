@@ -1,6 +1,6 @@
 # flatpak-sync
 
-Easily your flatpaks between your linux PCs!
+Easily your flatpaks between your linux PCs! (currently only as a one-shot command)
 
 # Usage
 
@@ -21,7 +21,7 @@ $ cargo build --release
 flatpak-sync [OPTIONS] --username <USERNAME> --remote-host <REMOTE_HOST> [--port <PORT>]
 ```
 
-- See `flatpak-sync --help` for more info
+- Run `flatpak-sync --help` for more info
 
 # TOD
 
@@ -29,6 +29,7 @@ flatpak-sync [OPTIONS] --username <USERNAME> --remote-host <REMOTE_HOST> [--port
 - [ ] Systemd (probably) service for ongoing syncing
 - [ ] Config sync (maybe)
 - [ ] GUI
+- [ ] Better readme, its 4am help
 
 # Reference links
 
