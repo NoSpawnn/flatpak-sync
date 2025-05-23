@@ -166,8 +166,6 @@ impl SyncHost {
                     self.hostname
                 )
             }
-
-            break;
         }
 
         Ok(())
