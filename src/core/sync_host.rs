@@ -1,6 +1,11 @@
 use super::flatpak::Flatpak;
 use crate::cli::SshOpts;
-use std::{io, net::TcpStream, path::PathBuf, process::Command};
+use std::{
+    io::{self, Read},
+    net::TcpStream,
+    path::PathBuf,
+    process::Command,
+};
 
 pub(crate) const SSH_KEY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/sync-keys");
 
@@ -83,20 +88,19 @@ impl SyncHost {
             return Err(Error::SyncKeyPairExists);
         }
 
-        let hostname = String::from_utf8(
-            Command::new("hostname")
-                .output()
-                .map_err(Error::IoError)?
-                .stdout,
-        );
-        let keypair_location = format!("{SSH_KEY_DIR}/{}_sync-key", self.hostname);
+        match std::fs::create_dir(SSH_KEY_DIR) {
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return Err(Error::IoError(e)),
+            _ => {}
+        };
+
+        let keypair_location = std::fs::canonicalize(SSH_KEY_DIR)
+            .unwrap()
+            .join(format!("{}_sync-key", self.hostname));
 
         log::info!(
             "Generating new SSH keys for syncing with remote host `{}` (at {})",
             self.hostname,
-            std::fs::canonicalize(&keypair_location)
-                .unwrap()
-                .to_string_lossy()
+            &keypair_location.to_string_lossy()
         );
 
         let output = Command::new("ssh-keygen")
@@ -106,7 +110,7 @@ impl SyncHost {
                 "-N",
                 "",
                 "-f",
-                &keypair_location,
+                &keypair_location.to_string_lossy(),
                 "-C",
                 &format!("flatpak-sync@{}", self.hostname),
             ])
@@ -117,7 +121,7 @@ impl SyncHost {
         Command::new("ssh-copy-id")
             .args([
                 "-i",
-                &keypair_location,
+                &keypair_location.to_string_lossy(),
                 "-p",
                 &self.ssh_port.to_string(),
                 &format!("{}@{}", self.ssh_username, self.hostname),
@@ -127,36 +131,51 @@ impl SyncHost {
 
         self.sync_key_file = Some(PathBuf::from(&keypair_location));
 
+        log::info!(
+            "Identity file for {} set to {}",
+            self.hostname,
+            &keypair_location.to_string_lossy()
+        );
+
         Ok(())
     }
 
     pub fn install_flatpaks(&mut self, flatpaks: &[Flatpak]) -> Result<(), Error> {
         if self.ssh_session.is_none() {
+            log::warn!("Could not install flatpaks due to no SSH session");
             return Err(Error::NoSshSession);
         }
+
+        log::info!(
+            "Attempting to install flatpaks {} on host `{}`",
+            flatpaks
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            self.hostname
+        );
 
         let mut channel = self
             .ssh_session
             .as_ref()
             .ok_or(Error::NoSshSession)?
-            .channel_session()
-            .map_err(|e| Error::SshConnectionError {
-                tcp_error: None,
-                ssh_error: Some(e),
-            })?;
+            .channel_session()?;
 
+        // Maybe return a list of what failed to install?
         for flatpak in flatpaks {
-            println!("Installing {}", &flatpak.name);
+            log::info!("Installing {} on host `{}`", &flatpak.name, self.hostname);
 
-            let output = match Command::new("flatpak")
-                .arg("install")
-                .arg(flatpak.install_type.flag_string())
-                .arg(&flatpak.name)
-                .output()
-            {
-                Ok(output) => output,
-                Err(e) => return Err(Error::FlatpakInstallError(e)),
-            };
+            let cmd_string = format!(
+                "flatpak install {} {}",
+                flatpak.install_type.flag_string(),
+                &flatpak.name,
+            );
+            let mut cmd_output = String::new();
+
+            channel.exec(&cmd_string)?;
+            let _ = channel.read_to_string(&mut cmd_output);
+            println!("{cmd_output}");
         }
 
         channel.send_eof()?;
@@ -168,14 +187,18 @@ impl SyncHost {
     }
 }
 
-impl From<SshOpts> for SyncHost {
-    fn from(opts: SshOpts) -> Self {
-        SyncHost {
+impl TryFrom<SshOpts> for SyncHost {
+    type Error = Error;
+
+    fn try_from(opts: SshOpts) -> Result<Self, Self::Error> {
+        let mut sh = SyncHost {
             ssh_username: opts.username,
             hostname: opts.remote_host,
             sync_key_file: None,
             ssh_port: opts.port,
             ssh_session: None,
-        }
+        };
+        sh.generate_sync_keypair(false)?;
+        Ok(sh)
     }
 }
