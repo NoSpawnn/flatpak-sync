@@ -8,13 +8,13 @@ pub enum Error {
 }
 
 impl From<sync_host::Error> for Error {
-    fn from(e: sync_host::Error) -> Self {
-        Self::SyncHostError(e)
+    fn from(err: sync_host::Error) -> Self {
+        Self::SyncHostError(err)
     }
 }
 
 impl From<flatpak::Error> for Error {
-    fn from(e: flatpak::Error) -> Self {
-        Self::FlatpakError(e)
+    fn from(err: flatpak::Error) -> Self {
+        Self::FlatpakError(err)
     }
 }

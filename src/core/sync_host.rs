@@ -19,6 +19,15 @@ pub enum Error {
     NoSshSession,
 }
 
+impl From<ssh2::Error> for Error {
+    fn from(err: ssh2::Error) -> Self {
+        Error::SshConnectionError {
+            tcp_error: None,
+            ssh_error: Some(err),
+        }
+    }
+}
+
 pub struct SyncHost {
     pub ssh_username: String,
     pub hostname: String,
@@ -33,46 +42,24 @@ impl SyncHost {
             return Err(Error::NoSyncKey);
         }
 
-        let tcp = match TcpStream::connect(format!("{}:{}", &self.hostname, self.ssh_port)) {
-            Ok(stream) => stream,
-            Err(e) => {
-                return Err(Error::SshConnectionError {
+        let tcp =
+            TcpStream::connect(format!("{}:{}", &self.hostname, self.ssh_port)).map_err(|e| {
+                Error::SshConnectionError {
                     tcp_error: Some(e),
                     ssh_error: None,
-                });
-            }
-        };
+                }
+            })?;
 
-        let mut session = match ssh2::Session::new() {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(Error::SshConnectionError {
-                    tcp_error: None,
-                    ssh_error: Some(e),
-                });
-            }
-        };
+        let mut session = ssh2::Session::new()?;
 
         session.set_tcp_stream(tcp);
-
-        if let Err(e) = session.handshake() {
-            return Err(Error::SshConnectionError {
-                tcp_error: None,
-                ssh_error: Some(e),
-            });
-        }
-
-        if let Err(e) = session.userauth_pubkey_file(
+        session.handshake()?;
+        session.userauth_pubkey_file(
             &self.ssh_username,
             None,
             &self.sync_key_file.as_ref().unwrap(),
             None,
-        ) {
-            return Err(Error::SshConnectionError {
-                tcp_error: None,
-                ssh_error: Some(e),
-            });
-        }
+        )?;
 
         self.ssh_session = Some(session);
         Ok(())
@@ -80,23 +67,15 @@ impl SyncHost {
 
     pub fn disconnect(&mut self) -> Result<(), Error> {
         if let Some(session) = self.ssh_session.as_mut() {
-            match session.disconnect(
+            session.disconnect(
                 Some(ssh2::DisconnectCode::ByApplication),
-                "Other sync host requested to close the connection",
+                &format!("{} requested to close the connection", self.hostname),
                 None,
-            ) {
-                Ok(_) => {
-                    self.ssh_session = None;
-                    Ok(())
-                }
-                Err(e) => Err(Error::SshConnectionError {
-                    tcp_error: None,
-                    ssh_error: Some(e),
-                }),
-            }
-        } else {
-            Ok(())
+            )?;
+            self.ssh_session = None;
         }
+
+        Ok(())
     }
 
     fn generate_sync_keypair(&mut self, force: bool) -> Result<(), Error> {
@@ -120,7 +99,7 @@ impl SyncHost {
                 .to_string_lossy()
         );
 
-        let output = match Command::new("ssh-keygen")
+        let output = Command::new("ssh-keygen")
             .args([
                 "-t",
                 "rsa",
@@ -132,13 +111,10 @@ impl SyncHost {
                 &format!("flatpak-sync@{}", self.hostname),
             ])
             .output()
-        {
-            Ok(output) => output,
-            Err(e) => return Err(Error::SshKeyGenError(e)),
-        };
+            .map_err(Error::SshKeyGenError)?;
 
         log::info!("Copying SSH identity to remote host `{}`", self.hostname);
-        match Command::new("ssh-copy-id")
+        Command::new("ssh-copy-id")
             .args([
                 "-i",
                 &keypair_location,
@@ -147,30 +123,46 @@ impl SyncHost {
                 &format!("{}@{}", self.ssh_username, self.hostname),
             ])
             .status()
-        {
-            Err(e) => return Err(Error::SshKeyCopyError(e)),
-            _ => {}
-        };
+            .map_err(Error::SshKeyCopyError)?;
 
         self.sync_key_file = Some(PathBuf::from(&keypair_location));
 
         Ok(())
     }
 
-    pub fn install_flatpaks(&self, flatpaks: &[Flatpak]) -> Result<(), Error> {
-        for f in flatpaks {
-            println!("Installing {}", &f.name);
+    pub fn install_flatpaks(&mut self, flatpaks: &[Flatpak]) -> Result<(), Error> {
+        if self.ssh_session.is_none() {
+            return Err(Error::NoSshSession);
+        }
+
+        let mut channel = self
+            .ssh_session
+            .as_ref()
+            .ok_or(Error::NoSshSession)?
+            .channel_session()
+            .map_err(|e| Error::SshConnectionError {
+                tcp_error: None,
+                ssh_error: Some(e),
+            })?;
+
+        for flatpak in flatpaks {
+            println!("Installing {}", &flatpak.name);
 
             let output = match Command::new("flatpak")
                 .arg("install")
-                .arg(f.install_type.flag_string())
-                .arg(&f.name)
+                .arg(flatpak.install_type.flag_string())
+                .arg(&flatpak.name)
                 .output()
             {
                 Ok(output) => output,
                 Err(e) => return Err(Error::FlatpakInstallError(e)),
             };
         }
+
+        channel.send_eof()?;
+        channel.wait_eof()?;
+        channel.close()?;
+        channel.wait_close()?;
 
         Ok(())
     }
