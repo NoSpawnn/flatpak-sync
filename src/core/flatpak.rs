@@ -21,7 +21,7 @@ impl Flatpak {
         }
     }
 
-    fn get_local_installed() -> Result<Vec<Self>, Error> {
+    pub fn get_local_installed() -> Result<Vec<Self>, Error> {
         let output = Command::new("flatpak")
             .args(["list", "--app", "--columns=application,options"])
             .output()
