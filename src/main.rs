@@ -65,6 +65,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Generate SSH keypair for new remote host
     let hostname = String::from_utf8(Command::new("hostname").output()?.stdout)?;
     let keypair_name = format!("{}_sync-key", &args.remote);
+
+    log::info!(
+        "Generating new SSH keys for syncing with remote host `{}` (at {})",
+        &args.remote,
+        std::fs::canonicalize(&keypair_name)
+            .unwrap()
+            .to_string_lossy()
+    );
+
     let output = Command::new("ssh-keygen")
         .args([
             "-t",
@@ -79,6 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .output()?;
 
     // `ssh-copy-id` to that host (which prompts for password)
+    log::info!("Copying SSH identity to remote host `{}`", &args.remote);
     let output = Command::new("ssh-copy-id")
         .args([
             "-i",
