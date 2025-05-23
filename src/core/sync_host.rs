@@ -11,7 +11,7 @@ pub(crate) const SSH_KEY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/sync-
 
 #[derive(Debug)]
 pub enum Error {
-    SyncKeyPairExists,
+    SyncKeyPairExists(String),
     FlatpakInstallError(io::Error),
     IoError(io::Error),
     SshKeyGenError(io::Error),
@@ -70,7 +70,7 @@ impl SyncHost {
 
     fn generate_sync_keypair(&mut self, force: bool) -> Result<(), Error> {
         if !force && self.sync_key_file.is_some() {
-            return Err(Error::SyncKeyPairExists);
+            return Err(Error::SyncKeyPairExists(self.hostname.clone()));
         }
 
         match std::fs::create_dir(SSH_KEY_DIR) {
