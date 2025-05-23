@@ -162,9 +162,9 @@ impl SyncHost {
             .ok_or(Error::NoSshSession)?
             .channel_session()?;
 
-        // Maybe return a list of what failed to install?
+        // Maybe return a list of what failed to install (if anything)?
         for flatpak in flatpaks {
-            log::info!("Installing {} on host `{}`", &flatpak.name, self.hostname);
+            log::info!("Installing {} on host `{}`", flatpak.name, self.hostname);
 
             let cmd_string = format!(
                 "flatpak install {} {}",
@@ -175,7 +175,6 @@ impl SyncHost {
 
             channel.exec(&cmd_string)?;
             let _ = channel.read_to_string(&mut cmd_output);
-            println!("{cmd_output}");
         }
 
         channel.send_eof()?;
