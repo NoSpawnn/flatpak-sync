@@ -1,11 +1,6 @@
 use super::flatpak::Flatpak;
 use crate::cli::SshOpts;
-use std::{
-    io::{self, Read},
-    net::TcpStream,
-    path::PathBuf,
-    process::Command,
-};
+use std::{io, path::PathBuf, process::Command};
 
 pub(crate) const SSH_KEY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/sync-keys");
 
@@ -145,8 +140,8 @@ impl SyncHost {
         // Maybe return a list of what failed to install (if anything)?
         let session = self.ssh_session.as_ref().unwrap();
         for flatpak in flatpaks {
-            if self.blacklist.contains(&flatpak.name) {
-                log::info!("{} is in the blacklist, skipping", flatpak.name);
+            if !flatpak.should_sync {
+                log::info!("{} is set to not sync, skipping", flatpak.name);
                 continue;
             }
 

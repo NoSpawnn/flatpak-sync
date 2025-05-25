@@ -1,19 +1,23 @@
-mod views;
+mod components;
+
+use std::collections::HashMap;
 
 use crate::core::flatpak::Flatpak;
 use iced::{
-    Alignment, Length, Task,
+    Alignment, Length, Subscription, Task,
     widget::{Column, container, text},
+    window,
 };
 
 #[derive(Default)]
 pub struct GUI {
-    flatpaks: Vec<Flatpak>,
+    flatpaks: HashMap<String, Flatpak>,
 }
 
 #[derive(Debug)]
 enum Message {
-    SetFlatpakList(Vec<Flatpak>),
+    SetFlatpakShouldSync(String, bool),
+    CloseApplication,
 }
 
 impl GUI {
@@ -25,11 +29,13 @@ impl GUI {
     }
 
     fn with_flatpak_list(flatpaks: Vec<Flatpak>) -> Self {
-        Self { flatpaks }
+        Self {
+            flatpaks: flatpaks.into_iter().map(|f| (f.name.clone(), f)).collect(),
+        }
     }
 
     fn view(&self) -> iced::Element<Message> {
-        container(views::flatpaks_list(&self.flatpaks))
+        container(components::flatpaks_list(self.flatpaks.values()))
             .align_y(Alignment::Center)
             .align_x(Alignment::Center)
             .height(Length::Fill)
@@ -39,7 +45,16 @@ impl GUI {
 
     fn update(&mut self, message: Message) {
         match message {
-            Message::SetFlatpakList(flatpaks) => self.flatpaks = flatpaks,
+            Message::SetFlatpakShouldSync(flatpak_name, state) => {
+                if let Some(f) = self.flatpaks.get_mut(&flatpak_name) {
+                    f.should_sync = state;
+                    log::info!("Set `should_sync` of {flatpak_name} to {state}");
+                }
+            }
+            Message::CloseApplication => {
+                // Cleanup host connections
+                todo!()
+            }
         }
     }
 

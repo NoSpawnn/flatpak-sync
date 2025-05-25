@@ -10,6 +10,7 @@ pub enum Error {
 pub struct Flatpak {
     pub name: String,
     pub install_type: InstallType,
+    pub should_sync: bool,
 }
 
 impl Flatpak {
@@ -18,6 +19,7 @@ impl Flatpak {
         Flatpak {
             name: String::from(name),
             install_type: install_type,
+            should_sync: true,
         }
     }
 
