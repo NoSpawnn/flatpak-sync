@@ -5,6 +5,7 @@ pub mod sync_host;
 pub enum Error {
     SyncHostError(sync_host::Error),
     FlatpakError(flatpak::Error),
+    IcedError(iced::Error),
 }
 
 impl From<sync_host::Error> for Error {
@@ -16,5 +17,11 @@ impl From<sync_host::Error> for Error {
 impl From<flatpak::Error> for Error {
     fn from(err: flatpak::Error) -> Self {
         Self::FlatpakError(err)
+    }
+}
+
+impl From<iced::Error> for Error {
+    fn from(err: iced::Error) -> Self {
+        Self::IcedError(err)
     }
 }
