@@ -39,6 +39,7 @@ pub struct SyncHost {
     pub sync_key_file: Option<PathBuf>,
     ssh_port: u16,
     ssh_session: Option<openssh::Session>,
+    blacklist: Vec<String>,
 }
 
 impl SyncHost {
@@ -144,6 +145,11 @@ impl SyncHost {
         // Maybe return a list of what failed to install (if anything)?
         let session = self.ssh_session.as_ref().unwrap();
         for flatpak in flatpaks {
+            if self.blacklist.contains(&flatpak.name) {
+                log::info!("{} is in the blacklist, skipping", flatpak.name);
+                continue;
+            }
+
             log::info!("Installing {} on host `{}`", flatpak.name, self.hostname);
 
             let output = session
@@ -182,6 +188,7 @@ impl TryFrom<SshOpts> for SyncHost {
             sync_key_file: None,
             ssh_port: opts.port,
             ssh_session: None,
+            blacklist: opts.exclude,
         };
         sh.generate_sync_keypair(false)?;
         Ok(sh)

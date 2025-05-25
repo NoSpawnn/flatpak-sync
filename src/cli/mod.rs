@@ -15,4 +15,8 @@ pub struct SshOpts {
     /// SSH remote port
     #[arg(long, default_value_t = 22)]
     pub port: u16,
+
+    /// Flatpaks to exclude from syncing (blacklist)
+    #[arg(short, long, value_delimiter = ',', num_args=1..)]
+    pub exclude: Vec<String>,
 }
